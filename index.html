@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calculadora Rescisória</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px 16px;
+      background: #eef2f7;
+      color: #182638;
+      font-family: Arial, sans-serif;
+    }
+    main { max-width: 850px; margin: auto; }
+    header { margin-bottom: 24px; }
+    h1 { margin-bottom: 8px; }
+    p { line-height: 1.6; color: #526174; }
+    .card {
+      padding: 26px;
+      background: white;
+      border-radius: 14px;
+      box-shadow: 0 5px 24px #1826380d;
+      margin-bottom: 22px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+    }
+    label { display: block; font-size: 14px; font-weight: bold; }
+    input {
+      width: 100%;
+      margin-top: 8px;
+      padding: 12px;
+      border: 1px solid #b9c4d1;
+      border-radius: 7px;
+      font-size: 16px;
+    }
+    input:focus { outline: 2px solid #2563eb; }
+    small {
+      display: block;
+      margin-top: 7px;
+      color: #526174;
+      line-height: 1.4;
+    }
+    .actions { display: flex; gap: 12px; margin-top: 24px; }
+    button {
+      padding: 13px 22px;
+      border: 0;
+      border-radius: 7px;
+      font-size: 16px;
+      cursor: pointer;
+      background: #2563eb;
+      color: white;
+    }
+    button.secondary { background: #e7edf5; color: #182638; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 14px 0; border-bottom: 1px solid #e7edf5; }
+    th { text-align: left; font-weight: normal; }
+    td { text-align: right; white-space: nowrap; }
+    .total {
+      margin-top: 22px;
+      padding: 20px;
+      border-radius: 8px;
+      background: #eff6ff;
+    }
+    .total strong { display: block; margin-top: 8px; font-size: 30px; }
+    .notice { font-size: 13px; }
+    [hidden] { display: none; }
+    @media (max-width: 600px) {
+      .grid { grid-template-columns: 1fr; }
+      .card { padding: 20px; }
+      h1 { font-size: 26px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Calculadora Rescisória</h1>
+    <p>Simule suas verbas com base nos valores informados.</p>
+  </header>
+
+  <section class="card">
+    <form id="form">
+      <div class="grid">
+        <label>
+          Remuneração mensal base (R$)
+          <input id="salario" type="number" min="0.01"
+                 max="10000000" step="0.01" required placeholder="3000,00">
+        </label>
+
+        <label>
+          Dias de saldo salarial
+          <input id="dias" type="number" min="0" max="30"
+                 step="1" value="15" required>
+          <small>Convenção simplificada: remuneração dividida por 30.</small>
+        </label>
+
+        <label>
+          Avos de 13º devidos
+          <input id="decimo" type="number" min="0" max="12"
+                 step="1" value="6" required>
+          <small>Informe de 0 a 12, considerando a projeção aplicável do aviso.</small>
+        </label>
+
+        <label>
+          Avos de férias proporcionais
+          <input id="ferias" type="number" min="0" max="12"
+                 step="1" value="6" required>
+          <small>Informe de 0 a 12, considerando a projeção aplicável do aviso.</small>
+        </label>
+
+        <label>
+          Férias integrais devidas (R$, sem 1/3)
+          <input id="integrais" type="number" min="0" max="10000000"
+                 step="0.01" value="0" required>
+          <small>Valor base dos períodos adquiridos; não calcula dobra.</small>
+        </label>
+
+        <label>
+          Aviso indenizado a receber (dias)
+          <input id="aviso" type="number" min="0" max="90"
+                 step="1" value="0" required>
+          <small>Use zero se não houver aviso indenizado a receber.</small>
+        </label>
+
+        <label>
+          Outras verbas a receber (R$)
+          <input id="extras" type="number" min="0" max="10000000"
+                 step="0.01" value="0" required>
+        </label>
+
+        <label>
+          Descontos informados (R$)
+          <input id="descontos" type="number" min="0" max="10000000"
+                 step="0.01" value="0" required>
+          <small>Inclua manualmente adiantamentos e descontos aplicáveis.</small>
+        </label>
+      </div>
+
+      <div class="actions">
+        <button type="submit">Calcular</button>
+        <button type="reset" class="secondary">Limpar</button>
+      </div>
+    </form>
+  </section>
+
+  <section id="resultado" class="card" aria-live="polite" hidden>
+    <h2>Resultado da simulação</h2>
+    <table aria-label="Detalhamento das verbas">
+      <tbody id="itens"></tbody>
+    </table>
+    <div class="total">
+      Saldo estimado após descontos informados
+      <strong id="total"></strong>
+    </div>
+    <p id="observacao" class="notice"></p>
+  </section>
+
+  <p class="notice">
+    Projeto acadêmico. Os valores dependem dos dados informados e não
+    substituem um cálculo trabalhista profissional. Não inclui cálculo
+    automático de INSS, IRRF, FGTS, multas ou regras de convenções coletivas.
+    Informe apenas as verbas aplicáveis ao desligamento.
+    Nenhum dado é enviado ou armazenado por esta página.
+  </p>
+</main>
+
+<script>
+  "use strict";
+
+  const form = document.getElementById("form");
+  const resultado = document.getElementById("resultado");
+  const itens = document.getElementById("itens");
+  const moeda = new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
+
+  function numero(id) {
+    return document.getElementById(id).valueAsNumber;
+  }
+
+  // Arredonda cada verba para centavos antes de somar.
+  function centavos(valor) {
+    return Math.round((valor + Number.EPSILON) * 100);
+  }
+
+  function adicionarLinha(nome, valor) {
+    const linha = document.createElement("tr");
+    const descricao = document.createElement("th");
+    const quantia = document.createElement("td");
+
+    descricao.scope = "row";
+    descricao.textContent = nome;
+    quantia.textContent = moeda.format(valor / 100);
+
+    linha.append(descricao, quantia);
+    itens.append(linha);
+  }
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+
+    const campos = [
+      "salario", "dias", "decimo", "ferias",
+      "integrais", "aviso", "extras", "descontos"
+    ];
+
+    if (!campos.every(id => Number.isFinite(numero(id)))) return;
+
+    const salario = numero("salario");
+    const feriasProporcionais = centavos(salario * numero("ferias") / 12);
+    const feriasIntegrais = centavos(numero("integrais"));
+
+    const verbas = [
+      ["Saldo salarial", centavos(salario / 30 * numero("dias"))],
+      ["13º proporcional", centavos(salario / 12 * numero("decimo"))],
+      ["Férias proporcionais", feriasProporcionais],
+      ["1/3 das férias proporcionais", Math.round(feriasProporcionais / 3)],
+      ["Férias integrais", feriasIntegrais],
+      ["1/3 das férias integrais", Math.round(feriasIntegrais / 3)],
+      ["Aviso indenizado", centavos(salario / 30 * numero("aviso"))],
+      ["Outras verbas", centavos(numero("extras"))]
+    ];
+
+    const bruto = verbas.reduce((soma, verba) => soma + verba[1], 0);
+    const descontos = centavos(numero("descontos"));
+    const total = bruto - descontos;
+
+    itens.replaceChildren();
+    verbas.forEach(([nome, valor]) => adicionarLinha(nome, valor));
+    adicionarLinha("Total bruto", bruto);
+    adicionarLinha("Descontos informados", -descontos);
+
+    document.getElementById("total").textContent = moeda.format(total / 100);
+    document.getElementById("observacao").textContent = total < 0
+      ? "Os descontos informados superam as verbas. Revise os valores; este saldo não determina uma dívida do trabalhador."
+      : "Estimativa com os descontos informados. Tributos não são calculados automaticamente.";
+
+    resultado.hidden = false;
+  });
+
+  // Evita mostrar um resultado antigo após alterar os dados.
+  form.addEventListener("input", () => {
+    resultado.hidden = true;
+  });
+
+  form.addEventListener("reset", () => {
+    resultado.hidden = true;
+    itens.replaceChildren();
+  });
+</script>
+</body>
+</html>
