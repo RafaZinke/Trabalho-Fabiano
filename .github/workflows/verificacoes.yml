@@ -1,4 +1,4 @@
-name: Testes e SAST
+name: Testes SAST e publicacao no S3
 
 on:
   push:
@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Configurar Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -53,9 +53,43 @@ jobs:
           tar -tzf "build/trabalho-fabiano-${{ github.sha }}.tar.gz"
 
       - name: Disponibilizar pacote no GitHub
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pacote-aplicacao
           path: build/trabalho-fabiano-*.tar.gz
           if-no-files-found: error
           retention-days: 7
+
+  publicar_s3:
+    needs: verificar
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      AWS_REGION: us-east-1
+      BUCKET_PACOTES: trabalho-fabiano-pacotes-78c742d5fab4b9ca4a481405fd
+
+    steps:
+      - name: Baixar pacote aprovado
+        uses: actions/download-artifact@v8
+        with:
+          name: pacote-aplicacao
+          path: pacote
+
+      - name: Configurar acesso a AWS
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+          allowed-account-ids: "377185077880"
+
+      - name: Enviar pacote ao S3
+        run: |
+          ARQUIVO="trabalho-fabiano-${GITHUB_SHA}.tar.gz"
+          aws s3 cp "pacote/$ARQUIVO" "s3://$BUCKET_PACOTES/$ARQUIVO"
+          aws s3api head-object \
+            --bucket "$BUCKET_PACOTES" \
+            --key "$ARQUIVO"
