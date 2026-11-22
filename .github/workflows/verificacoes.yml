@@ -1,4 +1,4 @@
-name: Testes SAST e publicacao no S3
+name: Testes SAST e publicacao na EC2
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Baixar código
+      - name: Baixar codigo
         uses: actions/checkout@v6
 
       - name: Configurar Python
@@ -21,22 +21,28 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Instalar dependências
+      - name: Instalar dependencias
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install semgrep
 
+      - name: Conferir script de publicacao
+        run: |
+          sed -i 's/\r$//' deploy.sh
+          bash -n deploy.sh
+
       - name: Executar testes
         run: python -m unittest discover -s tests -v
 
-      - name: Analisar código com Semgrep
+      - name: Analisar codigo com Semgrep
         run: semgrep scan --config p/python --error app.py
 
       - name: Preparar pacote para EC2
         run: |
           mkdir -p build/pacote/wheelhouse
-          cp app.py index.html requirements.txt build/pacote/
+          cp app.py index.html requirements.txt deploy.sh build/pacote/
+          printf '%s\n' "$GITHUB_SHA" > build/pacote/VERSION
           python -m pip download \
             --requirement requirements.txt \
             --dest build/pacote/wheelhouse \
@@ -64,11 +70,16 @@ jobs:
     needs: verificar
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+
+    concurrency:
+      group: fabiano-producao
+      cancel-in-progress: false
 
     env:
       AWS_REGION: us-east-1
       BUCKET_PACOTES: trabalho-fabiano-pacotes-78c742d5fab4b9ca4a481405fd
+      INSTANCIA: i-0224e7568454d2701
 
     steps:
       - name: Baixar pacote aprovado
@@ -76,6 +87,11 @@ jobs:
         with:
           name: pacote-aplicacao
           path: pacote
+
+      - name: Configurar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
 
       - name: Configurar acesso a AWS
         uses: aws-actions/configure-aws-credentials@v6.3.0
@@ -88,32 +104,78 @@ jobs:
 
       - name: Enviar pacote ao S3
         run: |
-          ARQUIVO="trabalho-fabiano-${GITHUB_SHA}.tar.gz"
+          ARQUIVO="trabalho-fabiano-$GITHUB_SHA.tar.gz"
           aws s3 cp "pacote/$ARQUIVO" "s3://$BUCKET_PACOTES/$ARQUIVO"
           aws s3api head-object \
             --bucket "$BUCKET_PACOTES" \
             --key "$ARQUIVO"
 
-      - name: Testar acesso a EC2 pelo SSM
+      - name: Preparar comando de publicacao
         run: |
-          INSTANCIA="i-0224e7568454d2701"
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import shlex
+          from pathlib import Path
 
+          versao = os.environ["GITHUB_SHA"]
+          if not re.fullmatch(r"[0-9a-f]{40}", versao):
+              raise SystemExit("Commit invalido")
+
+          arquivo = f"trabalho-fabiano-{versao}.tar.gz"
+          origem = f"s3://{os.environ['BUCKET_PACOTES']}/{arquivo}"
+          pacote = f"/tmp/{arquivo}"
+          script = f"/tmp/fabiano-deploy-{versao}.sh"
+          q = shlex.quote
+
+          comandos = [
+              "set -eu",
+              f"aws s3 cp {q(origem)} {q(pacote)} --region us-east-1",
+              f"tar -xOf {q(pacote)} ./deploy.sh > {q(script)}",
+              f"flock -w 60 /var/lock/fabiano-deploy.lock bash {q(script)} {q(pacote)} {q(versao)}",
+          ]
+          parametros = {"commands": comandos, "executionTimeout": ["600"]}
+          Path("comando-ssm.json").write_text(json.dumps(parametros))
+          PY
+
+      - name: Atualizar aplicacao na EC2 pelo SSM
+        run: |
           COMANDO_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCIA" \
             --document-name "AWS-RunShellScript" \
-            --comment "Verificar aplicacao pelo GitHub Actions" \
-            --parameters '{"commands":["set -eu","systemctl is-active fabiano","curl --fail --show-error http://127.0.0.1:8000/health"]}' \
+            --comment "Publicacao pelo GitHub Actions" \
+            --timeout-seconds 120 \
+            --parameters file://comando-ssm.json \
             --query "Command.CommandId" \
             --output text)
 
-          FALHOU=0
-          aws ssm wait command-executed \
-            --command-id "$COMANDO_ID" \
-            --instance-id "$INSTANCIA" || FALHOU=1
+          echo "Comando SSM: $COMANDO_ID"
+          STATUS="Pending"
+
+          for TENTATIVA in $(seq 1 144); do
+            if STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMANDO_ID" \
+              --instance-id "$INSTANCIA" \
+              --query Status --output text 2>ssm-status.err); then
+              case "$STATUS" in
+                Success|Cancelled|Cancelling|TimedOut|Failed) break ;;
+              esac
+            elif grep -q "InvocationDoesNotExist" ssm-status.err; then
+              STATUS="Pending"
+            else
+              cat ssm-status.err >&2
+              exit 1
+            fi
+            sleep 5
+          done
 
           aws ssm get-command-invocation \
             --command-id "$COMANDO_ID" \
             --instance-id "$INSTANCIA" \
             --query '{Status:Status,Saida:StandardOutputContent,Erro:StandardErrorContent}'
 
-          test "$FALHOU" -eq 0
+          if [ "$STATUS" != "Success" ]; then
+            echo "Publicacao nao concluida com sucesso: $STATUS"
+            exit 1
+          fi
