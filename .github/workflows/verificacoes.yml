@@ -32,3 +32,30 @@ jobs:
 
       - name: Analisar código com Semgrep
         run: semgrep scan --config p/python --error app.py
+
+      - name: Preparar pacote para EC2
+        run: |
+          mkdir -p build/pacote/wheelhouse
+          cp app.py index.html requirements.txt build/pacote/
+          python -m pip download \
+            --requirement requirements.txt \
+            --dest build/pacote/wheelhouse \
+            --only-binary=:all: \
+            --platform manylinux2014_x86_64 \
+            --python-version 3.12 \
+            --implementation cp \
+            --abi cp312
+
+      - name: Compactar pacote
+        run: |
+          tar -czf "build/trabalho-fabiano-${{ github.sha }}.tar.gz" \
+            -C build/pacote .
+          tar -tzf "build/trabalho-fabiano-${{ github.sha }}.tar.gz"
+
+      - name: Disponibilizar pacote no GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: pacote-aplicacao
+          path: build/trabalho-fabiano-*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
