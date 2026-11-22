@@ -3,3 +3,10 @@ __pycache__/
 *.pyc
 simulacoes.db
 .env
+# Terraform
+**/.terraform/
+*.tfstate*
+*.tfplan
+terraform.tfvars
+*.auto.tfvars
+crash.log
