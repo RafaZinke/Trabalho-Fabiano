@@ -93,3 +93,27 @@ jobs:
           aws s3api head-object \
             --bucket "$BUCKET_PACOTES" \
             --key "$ARQUIVO"
+
+      - name: Testar acesso a EC2 pelo SSM
+        run: |
+          INSTANCIA="i-0224e7568454d2701"
+
+          COMANDO_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCIA" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Verificar aplicacao pelo GitHub Actions" \
+            --parameters '{"commands":["set -eu","systemctl is-active fabiano","curl --fail --show-error http://127.0.0.1:8000/health"]}' \
+            --query "Command.CommandId" \
+            --output text)
+
+          FALHOU=0
+          aws ssm wait command-executed \
+            --command-id "$COMANDO_ID" \
+            --instance-id "$INSTANCIA" || FALHOU=1
+
+          aws ssm get-command-invocation \
+            --command-id "$COMANDO_ID" \
+            --instance-id "$INSTANCIA" \
+            --query '{Status:Status,Saida:StandardOutputContent,Erro:StandardErrorContent}'
+
+          test "$FALHOU" -eq 0
